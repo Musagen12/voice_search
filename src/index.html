@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Voice Assistant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center">
+
+    <!-- Header -->
+    <header class="w-full bg-indigo-600 text-white p-4 shadow">
+        <h1 class="text-center text-2xl font-semibold">LLM Voice Assistant</h1>
+    </header>
+
+    <!-- Status Section -->
+    <div class="mt-6 w-full max-w-4xl px-4">
+        <div id="status" class="status text-lg font-medium text-center py-2 bg-green-100 text-green-800 rounded">
+            WebSocket not connected
+        </div>
+    </div>
+
+    <!-- Conversation Section -->
+    <section class="mt-8 w-full max-w-4xl px-4">
+        <h2 class="text-xl font-semibold text-gray-800 mb-4">Conversation</h2>
+
+        <!-- Conversation Box -->
+        <div id="conversation-box" class="border rounded-lg bg-white shadow-md p-6 h-[60vh] overflow-y-auto">
+            <div id="messages" class="space-y-4">
+                <!-- Messages will be appended here -->
+            </div>
+        </div>
+
+        <!-- Input Section -->
+        <div class="mt-4 flex items-center space-x-4">
+            <input type="text" id="text-input" 
+                   class="w-full p-3 border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" 
+                   placeholder="Type your question here...">
+            <button id="submit-btn" 
+                    class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                Ask AI
+            </button>
+        </div>
+    </section>
+
+    <script>
+        const conversationBox = document.getElementById('conversation-box');
+        const messagesDiv = document.getElementById('messages');
+        const statusDiv = document.getElementById('status');
+        const textInput = document.getElementById('text-input');
+        const submitBtn = document.getElementById('submit-btn');
+
+        let speechSocket;
+        let llmSocket;
+        let isProcessing = false;
+
+        // Start the speech recognition WebSocket
+        const startSpeechWebSocket = () => {
+            speechSocket = new WebSocket('ws://127.0.0.1:8000/ws/recognize');
+
+            speechSocket.onopen = () => {
+                console.log('Speech WebSocket connected.');
+                statusDiv.textContent = 'Listening for voice commands...';
+                statusDiv.className = 'status text-lg font-medium py-2 bg-blue-100 text-blue-800 rounded text-center';
+            };
+
+            speechSocket.onmessage = (event) => {
+                const responseData = event.data;
+
+                // Process and display the response correctly
+                if (responseData.startsWith("Processing input:")) {
+                    appendMessage(responseData, 'recognized');
+                } else {
+                    // Assume it is an LLM response
+                    const parsedResponse = parseResponse(responseData);
+                    appendMessage(parsedResponse, 'response');
+                }
+            };
+
+            speechSocket.onclose = () => {
+                console.log('Speech WebSocket disconnected.');
+                statusDiv.textContent = 'Speech WebSocket disconnected';
+                statusDiv.className = 'status text-lg font-medium py-2 bg-red-100 text-red-800 rounded text-center';
+            };
+
+            speechSocket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                statusDiv.textContent = 'Speech WebSocket error occurred';
+                statusDiv.className = 'status text-lg font-medium py-2 bg-red-100 text-red-800 rounded text-center';
+            };
+        };
+
+        // Send a query to the LLM WebSocket
+        const sendToLLM = (query) => {
+            if (!llmSocket || llmSocket.readyState !== WebSocket.OPEN) {
+                startLLMWebSocket(() => llmSocket.send(query));
+            } else {
+                llmSocket.send(query);
+            }
+        };
+
+        // Start the LLM WebSocket and reuse the connection
+        const startLLMWebSocket = (onOpenCallback) => {
+            llmSocket = new WebSocket('ws://127.0.0.1:8001/ws/llm_response');
+
+            llmSocket.onopen = () => {
+                console.log('LLM WebSocket connected.');
+                statusDiv.textContent = 'LLM WebSocket connected';
+                statusDiv.className = 'status text-lg font-medium py-2 bg-green-100 text-green-800 rounded text-center';
+
+                if (onOpenCallback) {
+                    onOpenCallback();
+                }
+            };
+
+            llmSocket.onmessage = (event) => {
+                const responseData = event.data;
+                console.log('Received from LLM:', responseData);
+
+                // Parse the response and display it
+                const parsedResponse = parseResponse(responseData);
+                appendMessage(parsedResponse, 'response');
+                isProcessing = false;
+            };
+
+            llmSocket.onclose = () => {
+                console.log('LLM WebSocket disconnected.');
+            };
+
+            llmSocket.onerror = (error) => {
+                console.error('LLM WebSocket error:', error);
+                appendMessage('Error in receiving LLM response.', 'error');
+            };
+        };
+
+        // Function to parse the response from LLM
+        const parseResponse = (responseData) => {
+            let responseMessage = responseData;
+            try {
+                const parsedResponse = JSON.parse(responseData);
+                responseMessage = parsedResponse.response || responseData;
+            } catch (e) {
+                console.log("Response is not in JSON format.");
+            }
+            return responseMessage;
+        };
+
+        // Append both the question and response in the conversation area
+        const appendMessage = (message, type) => {
+            let colorClass = 'text-black'; // Default for recognized queries (voice input)
+            if (type === 'response') {
+                colorClass = 'text-green-700';
+            }
+
+            const messageHtml = `
+                <div class="flex items-start space-x-4">
+                    <div class="bg-gray-100 p-3 rounded-lg w-full">
+                        <p class="${colorClass} font-medium">${message}</p>
+                    </div>
+                </div>
+            `;
+
+            messagesDiv.innerHTML += messageHtml;
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        };
+
+        // Handle text input submission
+        submitBtn.addEventListener('click', () => {
+            const typedQuery = textInput.value.trim();
+            if (typedQuery) {
+                appendMessage(typedQuery, 'recognized'); // Treat typed text as recognized input
+                sendToLLM(typedQuery); // Send the query to the LLM
+                textInput.value = ''; // Clear the input field
+            }
+        });
+
+        // Start WebSocket connections on page load
+        window.onload = () => {
+            startSpeechWebSocket();
+            startLLMWebSocket(); // Start the LLM WebSocket for responses
+        };
+    </script>
+</body>
+</html>

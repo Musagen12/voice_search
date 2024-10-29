@@ -1,0 +1,16 @@
+azure-cognitiveservices-speech
+fastapi
+uvicorn
+websockets
+python-dotenv
+langchain_ollama
+fastapi
+langchain_community
+langchain
+langchain_chroma
+pathlib
+pypdf
+requests
+uuid
+chardet
+httpx
